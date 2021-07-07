@@ -1,0 +1,170 @@
+---
+title: "Binge drinking"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(hrbrthemes)
+theme_set(theme_bw())
+
+library(boot)
+library(broom)
+```
+
+```{r}
+results = read_csv(here::here("data/results.csv"), 
+                 col_types = "ccdddd")
+classificadores <- unique(results$Classificador)
+cenarios <- unique(results$Cenário)
+classificadores
+```
+
+
+```{r}
+theta <- function(d, i) {
+    m = d %>% 
+        slice(i) %>% 
+        summarise(m = mean(F1)) %>%
+        pull(m)
+    m
+}
+
+ci <- function(cen, cla){
+  df <- filter(results, `Cenário`==cen, Classificador==cla)
+  if(length(unique(df$F1))>1){
+    temp <- tidy(
+      boot(data = df, 
+       statistic = theta, 
+       R = 2000), 
+      conf.level = .95,
+      conf.method = "basic",
+      conf.int = TRUE)
+    data.frame(cenario = cen, classificador = cla, statistic = temp$statistic, conf.low = temp$conf.low, conf.high = temp$conf.high)
+  } else {
+    temp <- mean(df$F1)
+    data.frame(cenario = cen, classificador = cla, statistic = temp, conf.low = temp, conf.high = temp)
+  }
+}
+
+estimado <- bind_rows(lapply(cenarios, function(X){
+  bind_rows(lapply(classificadores, function(Y){
+    ci(X,Y)
+  }))
+}))
+
+glimpse(estimado)
+```
+
+```{r}
+ci_cen <- function(cen){
+  df <- filter(results, `Cenário`==cen)
+  if(length(unique(df$F1))>1){
+    temp <- tidy(
+      boot(data = df, 
+       statistic = theta, 
+       R = 2000), 
+      conf.level = .95,
+      conf.method = "basic",
+      conf.int = TRUE)
+    data.frame(cenario = cen, statistic = temp$statistic, conf.low = temp$conf.low, conf.high = temp$conf.high)
+  } else {
+    temp <- mean(df$F1)
+    data.frame(cenario = cen, statistic = temp, conf.low = temp, conf.high = temp)
+  }
+}
+
+cis_cenarios <- bind_rows(lapply(cenarios, function(X){
+  ci_cen(X)
+}))
+
+glimpse(cis_cenarios)
+```
+
+```{r}
+
+ci_cla <- function(cla){
+  df <- filter(results, Classificador==cla)
+  if(length(unique(df$F1))>1){
+    temp <- tidy(
+      boot(data = df, 
+       statistic = theta, 
+       R = 2000), 
+      conf.level = .95,
+      conf.method = "basic",
+      conf.int = TRUE)
+    data.frame(classificador = cla, statistic = temp$statistic, conf.low = temp$conf.low, conf.high = temp$conf.high)
+  } else {
+    temp <- mean(df$F1)
+    data.frame(classificador = cla, statistic = temp, conf.low = temp, conf.high = temp)
+  }
+}
+
+cis_classificadores <- 
+  bind_rows(lapply(classificadores, function(Y){
+    ci_cla(Y)
+  }))
+
+glimpse(cis_classificadores)
+```
+
+```{r}
+estimado %>%
+    ggplot(aes(y=reorder(classificador, statistic), x=statistic, xmin=conf.low, xmax=conf.high)) +
+    geom_linerange() +
+    geom_point(size=3) +
+    xlab("F1") + 
+    ylab("Classificador") +
+    facet_wrap(~cenario, ncol=3)
+```
+
+```{r}
+cis_cenarios %>%
+    ggplot(aes(y=cenario, x=statistic, xmin=conf.low, xmax=conf.high)) +
+    geom_linerange() +
+    geom_point(size=3) +
+    xlab("F1") + 
+    ylab("Classificador")
+```
+
+```{r}
+cis_classificadores %>%
+  filter(classificador!="KMeans") %>%
+    ggplot(aes(y=reorder(classificador, statistic), x=statistic, xmin=conf.low, xmax=conf.high)) +
+    geom_linerange() +
+    geom_point(size=3) +
+    xlab("F1") + 
+    ylab("Classificador") 
+ggsave("figure1.eps", width=15, height=8, units="cm", dpi=600)
+```
+```{r}
+vis1 <- estimado %>%
+  filter(classificador == "RidgeClassifier")
+
+vis1 %>%
+    ggplot(aes(y=cenario, x=statistic, xmin=conf.low, xmax=conf.high)) +
+    geom_linerange() +
+    geom_point(size=3) +
+    xlab("F1") + 
+    ylab("Cenário") 
+ggsave("figure2.eps", width=15, height=8, units="cm", dpi=600)
+```
+
+```{r}
+vis2 <- estimado %>%
+  filter((cenario == "Chatbot" & classificador == "RidgeClassifier")
+         |(cenario == "AskUbuntu" & classificador == "LinearSVC")
+         |(cenario == "WebApplication" & classificador == "BernoulliNB"))
+
+vis2 %>%
+    ggplot(aes(y=classificador, x=statistic, xmin=conf.low, xmax=conf.high)) +
+    geom_linerange() +
+    geom_point(size=3) +
+    xlab("F1") + 
+    ylab("Cenário") 
+ggsave("figure3.eps", width=15, height=8, units="cm", dpi=600)
+```
+
